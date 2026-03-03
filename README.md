@@ -3,11 +3,11 @@
 Standalone MCP server that bridges Codex (or any MCP client) to a second-brain HTTP gateway.
 
 ## Tools
-- `remember(content, tags=[])`
+- `remember(content, tags=[], force=false)`
 - `recall(query, limit=10)`
 - `recent(limit=20)`
 - `forget(id)`
-- `remember_for_project(project, content, tags=[])`
+- `remember_for_project(project, content, tags=[], force=false)`
 - `recall_for_project(project, query, limit=10, scan_limit=60)`
 - `recent_for_project(project, limit=20, scan_limit=120)`
 - `list_projects(scan_limit=300)`
@@ -32,7 +32,7 @@ The process uses stdio transport (for MCP clients).
 
 ## Gateway API contract
 Expected endpoints:
-- `POST /api/remember` with `{"content": "...", "tags": ["..."]}`
+- `POST /api/remember` with `{"content": "...", "tags": ["..."], "force": false}`
 - `POST /api/recall` with `{"query": "...", "limit": 10, "project": "optional", "tags": ["optional"]}`
 - `GET /api/recent?limit=20&project=optional&tags=comma,separated`
 - `GET /api/projects?limit=200`
@@ -60,3 +60,4 @@ Backward compatibility:
 - Do not expose your gateway on the public internet without auth.
 - Prefer API-key auth (`SECOND_BRAIN_API_KEY`) and TLS at your reverse proxy.
 - This MCP bridge intentionally avoids storing DB credentials; it only calls your gateway.
+- If gateway secret-guard blocks a note, you can intentionally override with `force=true` in `remember`/`remember_for_project`.

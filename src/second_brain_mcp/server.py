@@ -147,9 +147,9 @@ def _filter_project_from_recent_fallback(project: str, limit: int, scan_limit: i
 
 
 @mcp.tool()
-def remember(content: str, tags: list[str] | None = None) -> dict[str, Any]:
+def remember(content: str, tags: list[str] | None = None, force: bool = False) -> dict[str, Any]:
     """Store a note in second brain memory."""
-    data = _post("/api/remember", {"content": content, "tags": _tags_with_optional_default_project(tags)})
+    data = _post("/api/remember", {"content": content, "tags": _tags_with_optional_default_project(tags), "force": bool(force)})
     return _sanitize_ack(data)
 
 
@@ -177,9 +177,9 @@ def forget(id: str) -> dict[str, Any]:
 
 
 @mcp.tool()
-def remember_for_project(project: str, content: str, tags: list[str] | None = None) -> dict[str, Any]:
+def remember_for_project(project: str, content: str, tags: list[str] | None = None, force: bool = False) -> dict[str, Any]:
     """Store a note with project namespace tag (project:<name>)."""
-    data = _post("/api/remember", {"content": content, "tags": _tags_with_project(tags, project)})
+    data = _post("/api/remember", {"content": content, "tags": _tags_with_project(tags, project), "force": bool(force)})
     return _sanitize_ack(data)
 
 
