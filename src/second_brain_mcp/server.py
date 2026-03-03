@@ -133,7 +133,7 @@ def _filter_results_by_project(items: list[dict[str, Any]], project: str) -> lis
     return [item for item in items if tag in (item.get("tags") or [])]
 
 
-def _filter_project_from_recent(project: str, limit: int, scan_limit: int) -> dict[str, Any]:
+def _filter_project_from_recent_fallback(project: str, limit: int, scan_limit: int) -> dict[str, Any]:
     wanted = _clamp_limit(limit, 20)
     scanned = max(wanted, _clamp_limit(scan_limit, DEFAULT_SCAN_LIMIT))
     data = _get("/api/recent", {"limit": scanned})
@@ -189,48 +189,97 @@ def recall_for_project(project: str, query: str, limit: int = 10, scan_limit: in
     Recall notes for one project.
 
     Strategy:
-    1) semantic recall with query, then filter by project tag
-    2) if empty, fallback to project-scoped recent scan
+    1) Prefer gateway-side project filtering.
+    2) Fallback to client-side filtering for older gateways.
     """
     wanted = _clamp_limit(limit, 10)
-    scanned = max(wanted, _clamp_limit(scan_limit, DEFAULT_SCAN_LIMIT))
-    semantic = _post("/api/recall", {"query": query, "limit": scanned})
-    filtered = _filter_results_by_project(_sanitize_note_list(semantic.get("results", [])), project)[:wanted]
-    if filtered:
+    normalized_project = _normalize_project(project)
+    try:
+        data = _post("/api/recall", {"query": query, "limit": wanted, "project": normalized_project})
         return {
-            "ok": semantic.get("ok", True),
-            "project": _normalize_project(project),
-            "results": filtered,
-            "strategy": "semantic+project-filter",
-            "scanned": scanned,
+            "ok": data.get("ok", True),
+            "project": normalized_project,
+            "results": _sanitize_note_list(data.get("results", [])),
+            "strategy": "server-filter",
+            "scanned": wanted,
         }
-    fallback = _filter_project_from_recent(project, wanted, scanned)
-    fallback["strategy"] = "recent-fallback"
-    return fallback
+    except RuntimeError:
+        scanned = max(wanted, _clamp_limit(scan_limit, DEFAULT_SCAN_LIMIT))
+        semantic = _post("/api/recall", {"query": query, "limit": scanned})
+        filtered = _filter_results_by_project(_sanitize_note_list(semantic.get("results", [])), normalized_project)[:wanted]
+        if filtered:
+            return {
+                "ok": semantic.get("ok", True),
+                "project": normalized_project,
+                "results": filtered,
+                "strategy": "fallback-semantic+client-filter",
+                "scanned": scanned,
+            }
+        fallback = _filter_project_from_recent_fallback(normalized_project, wanted, scanned)
+        fallback["strategy"] = "fallback-recent+client-filter"
+        return fallback
 
 
 @mcp.tool()
 def recent_for_project(project: str, limit: int = 20, scan_limit: int = 120) -> dict[str, Any]:
-    """Get recent notes for one project using project:<name> tag filter."""
-    return _filter_project_from_recent(project, limit, scan_limit)
+    """
+    Get recent notes for one project.
+
+    Strategy:
+    1) Prefer gateway-side project filtering.
+    2) Fallback to client-side filtering for older gateways.
+    """
+    wanted = _clamp_limit(limit, 20)
+    normalized_project = _normalize_project(project)
+    try:
+        data = _get("/api/recent", {"limit": wanted, "project": normalized_project})
+        return {
+            "ok": data.get("ok", True),
+            "project": normalized_project,
+            "results": _sanitize_note_list(data.get("results", [])),
+            "strategy": "server-filter",
+            "scanned": wanted,
+        }
+    except RuntimeError:
+        fallback = _filter_project_from_recent_fallback(normalized_project, wanted, scan_limit)
+        fallback["strategy"] = "fallback-recent+client-filter"
+        return fallback
 
 
 @mcp.tool()
 def list_projects(scan_limit: int = 300) -> dict[str, Any]:
-    """List project namespaces found in recent notes via tags project:<name>."""
+    """
+    List project namespaces.
+
+    Strategy:
+    1) Prefer dedicated gateway endpoint `/api/projects`.
+    2) Fallback to scanning recent notes for older gateways.
+    """
     scanned = _clamp_limit(scan_limit, DEFAULT_SCAN_LIMIT)
-    data = _get("/api/recent", {"limit": scanned})
-    counts: dict[str, int] = {}
-    for item in _sanitize_note_list(data.get("results", [])):
-        for tag in item.get("tags") or []:
-            if not isinstance(tag, str) or not tag.startswith("project:"):
+    try:
+        data = _get("/api/projects", {"limit": scanned})
+        projects: list[dict[str, Any]] = []
+        for row in data.get("projects", []) if isinstance(data.get("projects", []), list) else []:
+            if not isinstance(row, dict):
                 continue
-            project = tag.split(":", 1)[1].strip().lower()
+            project = str(row.get("project", "")).strip().lower()
             if not project:
                 continue
-            counts[project] = counts.get(project, 0) + 1
-    projects = [{"project": name, "count": counts[name]} for name in sorted(counts)]
-    return {"ok": data.get("ok", True), "projects": projects, "scanned": scanned}
+            projects.append({"project": project, "count": int(row.get("count", 0))})
+        return {"ok": data.get("ok", True), "projects": projects, "scanned": scanned, "strategy": "server-projects-endpoint"}
+    except RuntimeError:
+        data = _get("/api/recent", {"limit": scanned})
+        counts: dict[str, int] = {}
+        for item in _sanitize_note_list(data.get("results", [])):
+            for tag in item.get("tags") or []:
+                if not isinstance(tag, str) or not tag.startswith("project:"):
+                    continue
+                project = tag.split(":", 1)[1].strip().lower()
+                if not project:
+                    continue
+                counts[project] = counts.get(project, 0) + 1
+        projects = [{"project": name, "count": counts[name]} for name in sorted(counts)]
+        return {"ok": data.get("ok", True), "projects": projects, "scanned": scanned, "strategy": "fallback-recent-scan"}
 
 
 def main() -> None:

@@ -33,8 +33,9 @@ The process uses stdio transport (for MCP clients).
 ## Gateway API contract
 Expected endpoints:
 - `POST /api/remember` with `{"content": "...", "tags": ["..."]}`
-- `POST /api/recall` with `{"query": "...", "limit": 10}`
-- `GET /api/recent?limit=20`
+- `POST /api/recall` with `{"query": "...", "limit": 10, "project": "optional", "tags": ["optional"]}`
+- `GET /api/recent?limit=20&project=optional&tags=comma,separated`
+- `GET /api/projects?limit=200`
 - `POST /api/forget` with `{"id": "..."}`
 
 Expected response shape:
@@ -48,11 +49,12 @@ Note shape consumed by MCP:
 Project tools namespace memories with tag `project:<name>`.
 
 Current behavior:
-- `recall_for_project` performs semantic recall globally and filters by `project:<name>`.
-- If no match is found, it falls back to project-filtered `recent`.
+- `recall_for_project` requests gateway-side filtering via `project`.
+- `recent_for_project` requests gateway-side filtering via `project`.
+- `list_projects` uses gateway endpoint `/api/projects`.
 
-Recommended future gateway enhancement:
-- Add server-side tag/project filter support in recall/recent endpoints for precise and scalable project-scoped queries.
+Backward compatibility:
+- If the gateway does not support these filters/endpoints yet, MCP falls back to client-side filtering of recent/recall results.
 
 ## Security notes
 - Do not expose your gateway on the public internet without auth.
