@@ -1,0 +1,60 @@
+# second-brain-mcp
+
+Standalone MCP server that bridges Codex (or any MCP client) to a second-brain HTTP gateway.
+
+## Tools
+- `remember(content, tags=[])`
+- `recall(query, limit=10)`
+- `recent(limit=20)`
+- `forget(id)`
+- `remember_for_project(project, content, tags=[])`
+- `recall_for_project(project, query, limit=10, scan_limit=60)`
+- `recent_for_project(project, limit=20, scan_limit=120)`
+- `list_projects(scan_limit=300)`
+
+Project notes use tag namespace `project:<name>` (for example `project:kostula`).
+
+## Environment
+- `SECOND_BRAIN_URL` (default: `http://localhost:8088`)
+- `SECOND_BRAIN_TIMEOUT_SECONDS` (default: `20`)
+- `SECOND_BRAIN_DEFAULT_PROJECT` (optional; auto-adds `project:<name>` tag in `remember`)
+- `SECOND_BRAIN_API_KEY` (optional; sent as header for gateway auth)
+- `SECOND_BRAIN_API_KEY_HEADER` (default: `X-Second-Brain-Key`)
+
+## Local run
+```bash
+python -m venv .venv
+.venv/bin/pip install -e .
+SECOND_BRAIN_URL=http://localhost:8088 .venv/bin/second-brain-mcp
+```
+
+The process uses stdio transport (for MCP clients).
+
+## Gateway API contract
+Expected endpoints:
+- `POST /api/remember` with `{"content": "...", "tags": ["..."]}`
+- `POST /api/recall` with `{"query": "...", "limit": 10}`
+- `GET /api/recent?limit=20`
+- `POST /api/forget` with `{"id": "..."}`
+
+Expected response shape:
+- Ack responses: `{"ok": true, "id": "...", "created_at": "...", "updated_at": "..."}`
+- List responses: `{"ok": true, "results": [ ...notes ]}`
+
+Note shape consumed by MCP:
+- `id`, `content`, `tags`, `source`, `created_at`, `updated_at`, optional `rank`
+
+## Project namespacing
+Project tools namespace memories with tag `project:<name>`.
+
+Current behavior:
+- `recall_for_project` performs semantic recall globally and filters by `project:<name>`.
+- If no match is found, it falls back to project-filtered `recent`.
+
+Recommended future gateway enhancement:
+- Add server-side tag/project filter support in recall/recent endpoints for precise and scalable project-scoped queries.
+
+## Security notes
+- Do not expose your gateway on the public internet without auth.
+- Prefer API-key auth (`SECOND_BRAIN_API_KEY`) and TLS at your reverse proxy.
+- This MCP bridge intentionally avoids storing DB credentials; it only calls your gateway.

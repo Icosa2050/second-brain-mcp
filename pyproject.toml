@@ -1,0 +1,23 @@
+[project]
+name = "second-brain-mcp"
+version = "0.1.0"
+description = "MCP bridge for local second-brain gateway"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "mcp[cli]>=1.12.0",
+  "requests>=2.32.0",
+]
+
+[project.scripts]
+second-brain-mcp = "second_brain_mcp.server:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
