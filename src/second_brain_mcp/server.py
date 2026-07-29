@@ -155,7 +155,18 @@ def remember(content: str, tags: list[str] | None = None, force: bool = False) -
 
 @mcp.tool()
 def recall(query: str, limit: int = 10) -> dict[str, Any]:
-    """Recall notes from second brain memory."""
+    """
+    Recall notes from second brain memory.
+
+    Matches notes containing ANY query term, ranked so notes matching every
+    term sort first. Prefer a few distinctive terms over a long sentence;
+    common words add noise rather than precision.
+
+    Supports "quoted phrases" for exact sequences and -word to exclude.
+
+    Searches all notes, including ones with no project tag, so this reaches
+    more than recall_for_project does.
+    """
     wanted = _clamp_limit(limit, 10)
     data = _post("/api/recall", {"query": query, "limit": wanted})
     return {"ok": data.get("ok", True), "results": _sanitize_note_list(data.get("results", []))}
@@ -174,6 +185,52 @@ def forget(id: str) -> dict[str, Any]:
     """Soft-delete a note by id."""
     data = _post("/api/forget", {"id": id})
     return _sanitize_ack(data)
+
+
+@mcp.tool()
+def retag(
+    add: list[str] | None = None,
+    remove: list[str] | None = None,
+    ids: list[str] | None = None,
+    project: str | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """
+    Add or remove tags on existing notes in place, keeping id and created_at.
+
+    Select either explicit `ids` or every note in one `project`, not both.
+
+    Use this to relabel notes. Re-creating a note with remember and deleting
+    the original assigns a fresh created_at, which corrupts the dated record
+    these notes depend on.
+
+    To move a namespace:
+        retag(project="old-name", add=["project:new-name"], remove=["project:old-name"])
+    To adopt an untagged note into a project:
+        retag(ids=["<id>"], add=["project:name"])
+
+    Preview any bulk change with dry_run=True first; it reports the match
+    count and writes nothing.
+    """
+    payload: dict[str, Any] = {
+        "add": _normalize_tags(add),
+        "remove": _normalize_tags(remove),
+        "dry_run": bool(dry_run),
+    }
+    if ids:
+        payload["ids"] = [str(value) for value in ids]
+    if project:
+        payload["project"] = _normalize_project(project)
+
+    data = _post("/api/retag", payload)
+    result: dict[str, Any] = {
+        "ok": data.get("ok", True),
+        "results": _sanitize_note_list(data.get("results", [])),
+    }
+    for key in ("dry_run", "matched", "updated"):
+        if data.get(key) is not None:
+            result[key] = data[key]
+    return result
 
 
 @mcp.tool()
