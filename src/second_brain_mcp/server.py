@@ -10,6 +10,9 @@ from mcp.server.fastmcp import FastMCP
 BASE_URL = os.getenv("SECOND_BRAIN_URL", "http://localhost:8088").rstrip("/")
 TIMEOUT_SECONDS = float(os.getenv("SECOND_BRAIN_TIMEOUT_SECONDS", "20"))
 DEFAULT_PROJECT = os.getenv("SECOND_BRAIN_DEFAULT_PROJECT", "").strip()
+# Which agent is writing. Set SECOND_BRAIN_SOURCE=claude / codex per client so
+# a shared brain can tell who learned what.
+SOURCE = os.getenv("SECOND_BRAIN_SOURCE", "mcp").strip() or "mcp"
 API_KEY = os.getenv("SECOND_BRAIN_API_KEY", "").strip()
 API_KEY_HEADER = os.getenv("SECOND_BRAIN_API_KEY_HEADER", "X-Second-Brain-Key").strip() or "X-Second-Brain-Key"
 MAX_LIMIT = 200
@@ -106,7 +109,7 @@ def _tags_with_optional_default_project(tags: list[str] | None) -> list[str]:
 
 
 def _sanitize_note(item: dict[str, Any]) -> dict[str, Any]:
-    allowed_keys = ("id", "content", "tags", "source", "created_at", "updated_at", "rank")
+    allowed_keys = ("id", "content", "tags", "source", "memory_key", "created_at", "updated_at", "rank")
     return {key: item[key] for key in allowed_keys if key in item}
 
 
@@ -121,7 +124,7 @@ def _sanitize_note_list(items: Any) -> list[dict[str, Any]]:
 
 
 def _sanitize_ack(data: dict[str, Any]) -> dict[str, Any]:
-    allowed_keys = ("ok", "id", "created_at", "updated_at")
+    allowed_keys = ("ok", "id", "created_at", "updated_at", "memory_key", "supersedes")
     sanitized = {key: data[key] for key in allowed_keys if key in data}
     if "ok" not in sanitized:
         sanitized["ok"] = True
@@ -146,10 +149,45 @@ def _filter_project_from_recent_fallback(project: str, limit: int, scan_limit: i
     }
 
 
+def _remember_payload(
+    content: str,
+    tags: list[str],
+    force: bool,
+    memory_key: str | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "content": content,
+        "tags": tags,
+        "force": bool(force),
+        "source": SOURCE,
+    }
+    if memory_key:
+        payload["memory_key"] = _normalize_tag(memory_key)
+    return payload
+
+
 @mcp.tool()
-def remember(content: str, tags: list[str] | None = None, force: bool = False) -> dict[str, Any]:
-    """Store a note in second brain memory."""
-    data = _post("/api/remember", {"content": content, "tags": _tags_with_optional_default_project(tags), "force": bool(force)})
+def remember(
+    content: str,
+    tags: list[str] | None = None,
+    force: bool = False,
+    memory_key: str | None = None,
+) -> dict[str, Any]:
+    """
+    Store a note in second brain memory.
+
+    Pass `memory_key` for a fact that has a current value and will change
+    again: a policy, a convention, the state of an environment. Saving under
+    the same key retires the previous note, so recall returns one current
+    answer instead of the stale and the corrected version side by side.
+
+    Omit `memory_key` for a dated event worth keeping alongside others: what
+    happened, what was decided on a day, what a run produced.
+    """
+    data = _post(
+        "/api/remember",
+        _remember_payload(content, _tags_with_optional_default_project(tags), force, memory_key),
+    )
     return _sanitize_ack(data)
 
 
@@ -234,9 +272,24 @@ def retag(
 
 
 @mcp.tool()
-def remember_for_project(project: str, content: str, tags: list[str] | None = None, force: bool = False) -> dict[str, Any]:
-    """Store a note with project namespace tag (project:<name>)."""
-    data = _post("/api/remember", {"content": content, "tags": _tags_with_project(tags, project), "force": bool(force)})
+def remember_for_project(
+    project: str,
+    content: str,
+    tags: list[str] | None = None,
+    force: bool = False,
+    memory_key: str | None = None,
+) -> dict[str, Any]:
+    """
+    Store a note with project namespace tag (project:<name>).
+
+    See `remember` for when to pass `memory_key`. Keys are global, so scope
+    them by hand when the fact is project-specific, e.g.
+    memory_key="nebrivo:review-cost-policy".
+    """
+    data = _post(
+        "/api/remember",
+        _remember_payload(content, _tags_with_project(tags, project), force, memory_key),
+    )
     return _sanitize_ack(data)
 
 
